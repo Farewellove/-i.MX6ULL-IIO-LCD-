@@ -17,10 +17,12 @@ APP_CC := arm-linux-gnueabihf-gcc
 # 要编译的模块
 obj-m += ap3216c.o
 obj-m += sensor_driver.o
+obj-m += icm20608.o
 
 # 每个模块对应的源文件
 ap3216c-objs := kernel_drivers/ap3216c_iio/ap3216c.o
 sensor_driver-objs := kernel_drivers/sensor_driver/sensor_driver.o
+icm20608-objs:=kernel_drivers/icm20608_iio/icm20608.o
 
 # 头文件路径
 ccflags-y += -I$(PWD)/kernel_drivers/ap3216c_iio
