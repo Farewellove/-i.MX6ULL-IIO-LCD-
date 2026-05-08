@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "IMX6ULL Linux Kernel",
+            "includePath": [
+                "${workspaceFolder}/**",
+                "/home/why/zdyz/alientek_linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/include",
+                "/home/why/zdyz/alientek_linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/arch/arm/include",
+                "/home/why/zdyz/alientek_linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/arch/arm/include/generated",
+                "/home/why/zdyz/alientek_linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/include/generated",
+                "/home/why/zdyz/alientek_linux/linux-imx-rel_imx_4.1.15_2.1.0_ga_alientek/include/uapi"
+            ],
+            "defines": [
+                "__KERNEL__",
+                "MODULE",
+                "CONFIG_ARM",
+                "CONFIG_ARCH_MXC",
+                "DEBUG"
+            ],
+            "compilerPath": "/home/why/zdyz/a/env/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/bin/arm-linux-gnueabihf-gcc",
+            "cStandard": "c99",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "linux-gcc-arm"
+        }
+    ],
+    "version": 4
+}
