@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/4/21 15:02:44
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/8 22:00:13
+ * @LastEditTime: 2026/5/8 23:12:23
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -12,6 +12,12 @@
 #include <linux/init.h>
 #include <linux/spi/spi.h>
 #include "icm20608reg.h"
+
+static struct icm20508_dev
+{
+
+    struct spi_device *spi;
+};
 
 static int icm20608_probe(struct spi_device *spi)
 {
