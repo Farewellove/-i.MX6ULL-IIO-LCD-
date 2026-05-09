@@ -34,8 +34,8 @@ all:
 # 编译用户态程序
 app:
 	mkdir -p $(OUT_BIN)
-	$(APP_CC) user_app/test.c -o $(OUT_BIN)/test
-
+	$(APP_CC) user_app/ap3216cAPP.c -o $(OUT_BIN)/ap3216cAPP
+	$(APP_CC) user_app/icm20608APP.c -o $(OUT_BIN)/icm20608APP
 # 编译并安装到 output + NFS
 install: all app
 	mkdir -p $(OUT_MODULES)
