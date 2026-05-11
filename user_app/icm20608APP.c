@@ -50,7 +50,7 @@ int main(void)
         printf("Accel: X=%d Y=%d Z=%d | Gyro: X=%d Y=%d Z=%d | Temp=%d\n",
                ax, ay, az, gx, gy, gz, temp);
 
-        usleep(100000); // 0.1秒
+        sleep(1); // 1秒
     }
     return 0;
 }
