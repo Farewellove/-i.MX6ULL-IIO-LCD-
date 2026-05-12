@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/4/9 20:58:22
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/8 15:54:30
+ * @LastEditTime: 2026/5/12 21:17:53
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -178,6 +178,7 @@ static int ap3216c_read_raw(struct iio_dev *indio_dev,
         return IIO_VAL_INT;
 
     case IIO_CHAN_INFO_SCALE:
+        mutex_lock(&data->lock);
         switch (chan->type)
         {
         case IIO_LIGHT:
@@ -203,6 +204,7 @@ static int ap3216c_read_raw(struct iio_dev *indio_dev,
             return -EINVAL;
         }
 
+        mutex_lock(&data->lock);
     default:
         return -EINVAL;
     }

@@ -18,11 +18,13 @@ APP_CC := arm-linux-gnueabihf-gcc
 obj-m += ap3216c.o
 obj-m += sensor_driver.o
 obj-m += icm20608.o
+obj-m +=lcd.o
 
 # 每个模块对应的源文件
 ap3216c-objs := kernel_drivers/ap3216c_iio/ap3216c.o
 sensor_driver-objs := kernel_drivers/sensor_driver/sensor_driver.o
 icm20608-objs:=kernel_drivers/icm20608_iio/icm20608.o
+lcd-objs:=kernel_drivers/lcd_spi/lcd.o
 
 # 头文件路径
 ccflags-y += -I$(PWD)/kernel_drivers/ap3216c_iio
@@ -44,13 +46,14 @@ install: all app
 
 	cp -f *.ko $(OUT_MODULES)/
 	cp -f *.ko $(NFS_DIR)/
-	cp -f $(OUT_BIN)/test $(NFS_DIR)/
+	cp -f $(OUT_BIN)/icm20608APP  $(NFS_DIR)/
+	cp -f $(OUT_BIN)/ap3216cAPP  $(NFS_DIR)/
 
 	@echo "============================================="
 	@echo "✅ 模块已输出到：$(OUT_MODULES)"
 	@ls -l $(OUT_MODULES)/*.ko
 	@echo "✅ 用户程序已输出到：$(OUT_BIN)"
-	@ls -l $(OUT_BIN)/test
+	@ls -l $(OUT_BIN)
 	@echo "✅ 已同步到 NFS：$(NFS_DIR)"
 	@echo "============================================="
 

@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/4/21 15:02:44
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/11 22:01:24
+ * @LastEditTime: 2026/5/12 21:19:12
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -21,6 +21,7 @@ static struct icm20608_dev
 {
 
     struct spi_device *spi;
+    struct mutex lock; // SPI 访问锁
 };
 
 static int icm20608_read_reg(struct icm20608_dev *dev, u8 reg)
@@ -98,6 +99,7 @@ static int read_gyro_y(struct icm20608_dev *dev)
 }
 static int read_gyro_z(struct icm20608_dev *dev)
 {
+
     int h = icm20608_read_reg(dev, ICM20608_GYRO_ZOUT_H);
     int l = icm20608_read_reg(dev, ICM20608_GYRO_ZOUT_L);
     if (h < 0 || l < 0)
@@ -122,6 +124,7 @@ static int icm20608_read_raw(struct iio_dev *indio_dev,
     if (mask != IIO_CHAN_INFO_RAW)
         return -EINVAL;
 
+    mutex_lock(&data->lock);
     switch (chan->type)
     {
     case IIO_ACCEL:
@@ -144,11 +147,17 @@ static int icm20608_read_raw(struct iio_dev *indio_dev,
         *val = read_temp(data);
         break;
     default:
+        mutex_unlock(&data->lock);
         return -EINVAL;
     }
 
+    mutex_unlock(&data->lock);
     return IIO_VAL_INT;
 }
+
+static const struct iio_info icm20608_info = {
+    .read_raw = icm20608_read_raw,
+};
 
 static int icm20608_probe(struct spi_device *spi)
 {
@@ -214,9 +223,7 @@ static int icm20608_probe(struct spi_device *spi)
     indio_dev->name = "icm20608";
     indio_dev->channels = icm20608_channels;
     indio_dev->num_channels = ARRAY_SIZE(icm20608_channels);
-    indio_dev->info = &(struct iio_info){
-        .read_raw = icm20608_read_raw,
-    };
+    indio_dev->info = &icm20608_info;
     indio_dev->modes = INDIO_DIRECT_MODE;
 
     // **绑定到 SPI**
@@ -237,6 +244,7 @@ static int icm20608_probe(struct spi_device *spi)
            read_accel_z(data), read_gyro_x(data),
            read_gyro_y(data), read_gyro_z(data), read_temp(data));
     printk("icm20608 probe finished\n");
+    mutex_init(&data->lock);
     return 0;
 }
 
