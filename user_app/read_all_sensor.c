@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/5/13 09:56:12
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/13 22:10:12
+ * @LastEditTime: 2026/5/14 16:47:51
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -22,18 +22,34 @@
 #define SENSOR_DEV "/dev/sensor_collect"
 
 volatile sig_atomic_t stop = 0;
-void handle_sigint(int sig) { stop = 1; }
+void handle_sigint(int sig)
+{
+    stop = 1;
+}
 
 // ICM20608 六轴 + 温度节点
 const char *icm_channels[] = {
-    "in_accel0_raw", "in_accel1_raw", "in_accel2_raw",
-    "in_anglvel0_raw", "in_anglvel1_raw", "in_anglvel2_raw",
-    "in_temp0_raw"};
+    "in_accel0_raw",
+    "in_accel1_raw",
+    "in_accel2_raw",
+    "in_anglvel0_raw",
+    "in_anglvel1_raw",
+    "in_anglvel2_raw",
+    "in_temp0_raw",
+};
 #define ICM_NUM_CHANNELS (sizeof(icm_channels) / sizeof(icm_channels[0]))
 
 // AP3216C 光传感器节点
-const char *ap_channels_raw[] = {"in_illuminance_raw", "in_proximity_raw", "in_intensity_ir_raw"};
-const char *ap_channels_scale[] = {"in_illuminance_scale", "in_proximity_scale", "in_intensity_ir_scale"};
+const char *ap_channels_raw[] = {
+    "in_illuminance_raw",
+    "in_proximity_raw",
+    "in_intensity_ir_raw",
+};
+const char *ap_channels_scale[] = {
+    "in_illuminance_scale",
+    "in_proximity_scale",
+    "in_intensity_ir_scale",
+};
 #define AP_NUM_CHANNELS (sizeof(ap_channels_raw) / sizeof(ap_channels_raw[0]))
 
 // 读取整数 sysfs
@@ -54,9 +70,18 @@ int read_sysfs_int(const char *filename)
 }
 
 // 转换 ICM20608 单位
-float conv_accel(int raw) { return raw / 2048.0f; }
-float conv_gyro(int raw) { return raw / 16.4f; }
-float conv_temp(int raw) { return (raw / 326.8f) + 25.0f; }
+float conv_accel(int raw)
+{
+    return raw / 2048.0f;
+}
+float conv_gyro(int raw)
+{
+    return raw / 16.4f;
+}
+float conv_temp(int raw)
+{
+    return (raw / 326.8f) + 25.0f;
+}
 
 // 查找 IIO 设备路径
 int find_iio_device(const char *dev_name, char *dev_path, size_t size)
