@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/4/21 15:02:44
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/12 21:19:12
+ * @LastEditTime: 2026/5/13 22:06:58
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -63,7 +63,7 @@ static int read_accel_x(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_ACCEL_XOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_accel_y(struct icm20608_dev *dev)
 {
@@ -71,7 +71,7 @@ static int read_accel_y(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_ACCEL_YOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_accel_z(struct icm20608_dev *dev)
 {
@@ -79,7 +79,7 @@ static int read_accel_z(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_ACCEL_ZOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_gyro_x(struct icm20608_dev *dev)
 {
@@ -87,7 +87,7 @@ static int read_gyro_x(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_GYRO_XOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_gyro_y(struct icm20608_dev *dev)
 {
@@ -95,7 +95,7 @@ static int read_gyro_y(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_GYRO_YOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_gyro_z(struct icm20608_dev *dev)
 {
@@ -104,7 +104,7 @@ static int read_gyro_z(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_GYRO_ZOUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 static int read_temp(struct icm20608_dev *dev)
 {
@@ -112,7 +112,7 @@ static int read_temp(struct icm20608_dev *dev)
     int l = icm20608_read_reg(dev, ICM20608_TEMP_OUT_L);
     if (h < 0 || l < 0)
         return -EIO;
-    return (h << 8) | l;
+    return (int16_t)((h << 8) | l);
 }
 
 static int icm20608_read_raw(struct iio_dev *indio_dev,
@@ -147,7 +147,7 @@ static int icm20608_read_raw(struct iio_dev *indio_dev,
         *val = read_temp(data);
         break;
     default:
-        mutex_unlock(&data->lock);
+
         return -EINVAL;
     }
 
@@ -171,7 +171,8 @@ static int icm20608_probe(struct spi_device *spi)
         return -ENOMEM;
 
     data = iio_priv(indio_dev);
-    data->spi = spi; // 保存 SPI 指针
+    mutex_init(&data->lock); // <<< 这行要放在 probe 前面
+    data->spi = spi;
 
     // SPI 初始化
     spi->mode = SPI_MODE_0;
@@ -190,11 +191,11 @@ static int icm20608_probe(struct spi_device *spi)
 
     // 复位芯片
     icm20608_write_reg(data, ICM20608_PWR_MGMT_1, 0x80);
-    msleep(50);
+    mdelay(50); // 等待复位完成
 
-    // 退出休眠，选择时钟源
+    // 退出休眠，选择 PLL 时钟源
     icm20608_write_reg(data, ICM20608_PWR_MGMT_1, 0x01);
-    msleep(150);
+    mdelay(50);
 
     // WHO_AM_I 验证
     id = icm20608_read_reg(data, ICM20608_WHO_AM_I);
@@ -244,7 +245,7 @@ static int icm20608_probe(struct spi_device *spi)
            read_accel_z(data), read_gyro_x(data),
            read_gyro_y(data), read_gyro_z(data), read_temp(data));
     printk("icm20608 probe finished\n");
-    mutex_init(&data->lock);
+
     return 0;
 }
 

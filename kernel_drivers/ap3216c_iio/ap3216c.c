@@ -2,7 +2,7 @@
  * @Author: Farewellove
  * @Date: 2026/4/9 20:58:22
  * @LastEditors: Farewellove
- * @LastEditTime: 2026/5/12 21:17:53
+ * @LastEditTime: 2026/5/13 22:07:08
  * @Description:
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
@@ -166,6 +166,7 @@ static int ap3216c_read_raw(struct iio_dev *indio_dev,
             break;
 
         default:
+
             ret = -EINVAL;
             break;
         }
@@ -182,29 +183,24 @@ static int ap3216c_read_raw(struct iio_dev *indio_dev,
         switch (chan->type)
         {
         case IIO_LIGHT:
-            /*
-             * 第一版先给 1，表示 raw 与显示值暂时一一对应。
-             * 后续如果按照量程配置换算 lux，再修正这里。
-             */
             *val = 1;
             *val2 = 0;
-            return IIO_VAL_INT;
-
+            break;
         case IIO_PROXIMITY:
             *val = 1;
             *val2 = 0;
-            return IIO_VAL_INT;
-
+            break;
         case IIO_INTENSITY:
             *val = 1;
             *val2 = 0;
-            return IIO_VAL_INT;
-
+            break;
         default:
+
             return -EINVAL;
         }
+        mutex_unlock(&data->lock);
+        return IIO_VAL_INT;
 
-        mutex_lock(&data->lock);
     default:
         return -EINVAL;
     }

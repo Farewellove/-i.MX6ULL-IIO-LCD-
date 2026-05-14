@@ -36,8 +36,10 @@ all:
 # 编译用户态程序
 app:
 	mkdir -p $(OUT_BIN)
+	$(APP_CC) user_app/read_all_sensor.c -o $(OUT_BIN)/read_all_sensor
 	$(APP_CC) user_app/ap3216cAPP.c -o $(OUT_BIN)/ap3216cAPP
 	$(APP_CC) user_app/icm20608APP.c -o $(OUT_BIN)/icm20608APP
+
 # 编译并安装到 output + NFS
 install: all app
 	mkdir -p $(OUT_MODULES)
@@ -46,8 +48,9 @@ install: all app
 
 	cp -f *.ko $(OUT_MODULES)/
 	cp -f *.ko $(NFS_DIR)/
-	cp -f $(OUT_BIN)/icm20608APP  $(NFS_DIR)/
-	cp -f $(OUT_BIN)/ap3216cAPP  $(NFS_DIR)/
+	cp -f $(OUT_BIN)/read_all_sensor  $(NFS_DIR)/read_all_sensor
+	cp -f $(OUT_BIN)/ap3216cAPP  $(NFS_DIR)/ap3216cAPP
+	cp -f $(OUT_BIN)/icm20608APP  $(NFS_DIR)/icm20608APP
 
 	@echo "============================================="
 	@echo "✅ 模块已输出到：$(OUT_MODULES)"

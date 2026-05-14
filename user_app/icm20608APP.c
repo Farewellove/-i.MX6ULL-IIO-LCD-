@@ -4,6 +4,7 @@
 #include <fcntl.h>  // open
 #include <string.h> // memset
 #include <errno.h>
+#include <stdint.h> // C99 标准类型定义
 
 #define SYSFS_IIO_PATH "/sys/bus/iio/devices/iio:device0/"
 
@@ -44,20 +45,17 @@ int read_sysfs_int(const char *filename)
     return atoi(buf); // 转成整数
 }
 
-// 转换原始值到实际单位
-float convert_accel(int raw)
+float convert_accel(int16_t raw)
 {
-    return raw / 2048.0f; // ±16g, g 单位
-}
-
-float convert_gyro(int raw)
+    return raw / 2048.0f;
+} // ±16g
+float convert_gyro(int16_t raw)
 {
-    return raw / 16.4f; // ±2000 °/s
-}
-
-float convert_temp(int raw)
+    return raw / 16.4f;
+} // ±2000°/s
+float convert_temp(int16_t raw)
 {
-    return ((float)raw / 326.8f) + 25.0f; // °C
+    return ((float)raw / 326.8f) + 25;
 }
 
 int main()
