@@ -16,7 +16,7 @@ APP_CC := arm-linux-gnueabihf-gcc
 
 # 要编译的模块
 obj-m += ap3216c.o
-obj-m += sensor_keys.o
+#obj-m += sensor_keys.o
 obj-m += icm20608.o
 obj-m += gt911_ts.o
 
@@ -44,6 +44,7 @@ app:
 	$(APP_CC) user_app/ap3216cAPP.c -o $(OUT_BIN)/ap3216cAPP
 	$(APP_CC) user_app/icm20608APP.c -o $(OUT_BIN)/icm20608APP
 	$(APP_CC) user_app/lcd_test.c -o $(OUT_BIN)/lcd_test
+	$(APP_CC) user_app/input_test.c -o $(OUT_BIN)/input_test
 
 # 编译并安装到 output + NFS
 install: all app
@@ -53,6 +54,7 @@ install: all app
 	cp -f $(OUT_BIN)/ap3216cAPP  $(NFS_DIR)/
 	cp -f $(OUT_BIN)/icm20608APP  $(NFS_DIR)/
 	cp -f $(OUT_BIN)/lcd_test  $(NFS_DIR)/
+	cp -f $(OUT_BIN)/input_test  $(NFS_DIR)/
 	@echo "============================================="
 	@echo "模块已输出到：$(OUT_MODULES)"
 	@ls -l $(OUT_MODULES)/*.ko

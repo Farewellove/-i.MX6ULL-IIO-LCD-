@@ -101,9 +101,9 @@ int main(int argc, char *argv[])
     {
         unsigned int *p = (unsigned int *)fb;
         /* 根据 framebuffer 实际的 R/G/B 位偏移构造像素值 */
-        unsigned int c32 = ((color & 0xFF) << vinfo.red.offset) |
-                           ((color & 0xFF00) << (vinfo.green.offset - 8)) |
-                           ((color & 0xFF0000) << (vinfo.blue.offset - 16));
+        unsigned int c32 = (((color >>  0) & 0xFF) >> (8 - vinfo.red.length)) << vinfo.red.offset |
+                           (((color >>  8) & 0xFF) >> (8 - vinfo.green.length)) << vinfo.green.offset |
+                           (((color >> 16) & 0xFF) >> (8 - vinfo.blue.length)) << vinfo.blue.offset;
         for (y = 0; y < vinfo.yres; y++)
             for (x = 0; x < vinfo.xres; x++)
                 p[y * finfo.line_length / 4 + x] = c32;
