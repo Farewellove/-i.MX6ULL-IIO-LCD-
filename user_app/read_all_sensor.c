@@ -3,7 +3,10 @@
  * @Date: 2026/5/13 09:56:12
  * @LastEditors: Farewellove
  * @LastEditTime: 2026/5/14 16:47:51
- * @Description:
+ * @Description: 传感器综合采集用户态程序
+ *               同时读取 ICM20608 (6 轴 + 温度)、AP3216C (ALS/PS/IR)
+ *               和 sensor_collect (LED/KEY) 的数据并打印
+ *               通过 IIO sysfs 和字符设备 /dev/sensor_collect 读取
  * @Copyright: Copyright (©)}) 2026 Farewellove. All rights reserved.
  * @Email: 183085452@qq.com
  */
