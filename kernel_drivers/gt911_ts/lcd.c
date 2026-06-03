@@ -13,6 +13,8 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/gpio/consumer.h>
+#include <linux/mutex.h>
+#include <linux/workqueue.h>
 #include <linux/interrupt.h>
 #include <linux/input.h>
 #include <linux/input/mt.h>
@@ -48,6 +50,8 @@
 #define GT911_STATUS_BUF_READY  0x80  /* 状态寄存器 bit7 掩码 */
 #define GT911_TOUCH_POINT_SIZE  8     /* 每点 8 字节 */
 
+#define GT911_DEBUG_IRQ 0
+
 struct gt911_data
 {
     struct i2c_client *client;       /* 挂载的 I2C 设备 */
@@ -55,6 +59,10 @@ struct gt911_data
     struct gpio_desc *irq_gpio;      /* INT 引脚 (GPIO1_IO09, ACTIVE_LOW) */
     int irq;                         /* 中断号 (由 gpiod_to_irq 转换) */
     struct input_dev *input_dev;     /* 注册到 input 子系统的设备 */
+    struct mutex io_lock;            /* 保护 I2C 读写，防止 irq 和 reset_work 并发 */
+    struct work_struct reset_work;   /* 硬件复位工作队列 */
+    int irq_i2c_fail_count;          /* 连续 I2C 失败计数 */
+    bool reset_pending;              /* 是否已调度 reset_work */
 };
 
 /*
@@ -156,8 +164,6 @@ static int gt911_reset(struct gt911_data *data)
     u8 pid[4];
     int ret;
 
-    dev_info(dev, "GT911 RESET DESCRIPTOR VERSION\n");
-
     /* 1. RST 物理拉低，触发复位 */
     gpiod_direction_output_raw(data->reset_gpio, 0);
     msleep(20);
@@ -166,30 +172,17 @@ static int gt911_reset(struct gt911_data *data)
     gpiod_direction_output_raw(data->irq_gpio, 0);
     msleep(5);
 
-    dev_info(dev, "before release: rst raw=%d int raw=%d\n",
-             gpiod_get_raw_value(data->reset_gpio),
-             gpiod_get_raw_value(data->irq_gpio));
-
-    /* 3. RST 物理拉高，释放复位 → 芯片采样 INT 确定地址 */
+    /* 3. RST 物理拉高，释放复位 */
     gpiod_direction_output_raw(data->reset_gpio, 1);
     msleep(50);
 
-    dev_info(dev, "after release:  rst raw=%d int raw=%d\n",
-             gpiod_get_raw_value(data->reset_gpio),
-             gpiod_get_raw_value(data->irq_gpio));
-
-    /* 4. INT 切回输入模式，等待 GT911 初始化 */
+    /* 4. INT 切回输入 */
     gpiod_direction_input(data->irq_gpio);
     msleep(100);
 
-    dev_info(dev, "after int in:   rst raw=%d int raw=%d\n",
-             gpiod_get_raw_value(data->reset_gpio),
-             gpiod_get_raw_value(data->irq_gpio));
-
-    /* 5. 读 PID 验证芯片是否正常响应 */
+    /* 5. 读 PID */
     ret = gt911_i2c_read(data, GT_PID_REG, pid, 4);
-    if (ret < 0)
-    {
+    if (ret < 0) {
         dev_err(dev, "failed to read product ID: %d\n", ret);
         return ret;
     }
@@ -198,6 +191,64 @@ static int gt911_reset(struct gt911_data *data)
              pid[0], pid[1], pid[2], pid[3]);
 
     return 0;
+}
+
+/* 仅硬件复位时序 (RST/INT)，不涉及 I2C */
+static void gt911_hw_reset_raw(struct gt911_data *data)
+{
+    gpiod_direction_output_raw(data->reset_gpio, 0);
+    msleep(20);
+    gpiod_direction_output_raw(data->irq_gpio, 0);
+    msleep(5);
+    gpiod_direction_output_raw(data->reset_gpio, 1);
+    msleep(50);
+    gpiod_direction_input(data->irq_gpio);
+    msleep(100);
+}
+
+/* workqueue 恢复：关中断 → 硬件复位 → 读 PID → 清除计数 → 开中断 */
+static void gt911_reset_work(struct work_struct *work)
+{
+    struct gt911_data *data =
+        container_of(work, struct gt911_data, reset_work);
+    struct device *dev = &data->client->dev;
+    u8 pid[4];
+    int ret;
+
+    dev_warn(dev, "reset_work: start GT911 recovery\n");
+
+    disable_irq(data->irq);
+
+    mutex_lock(&data->io_lock);
+
+    gt911_hw_reset_raw(data);
+
+    ret = gt911_i2c_read(data, GT_PID_REG, pid, 4);
+    if (ret == 0)
+        dev_info(dev, "reset_work: GT911 recovered, PID=%c%c%c%c\n",
+                 pid[0], pid[1], pid[2], pid[3]);
+    else
+        dev_warn(dev, "reset_work: PID read failed: %d\n", ret);
+
+    data->irq_i2c_fail_count = 0;
+    data->reset_pending = false;
+    mutex_unlock(&data->io_lock);
+
+    enable_irq(data->irq);
+}
+
+/* 读 GT_GSTID_REG，失败重试最多 3 次 (threaded IRQ 可睡眠) */
+static int gt911_read_status_retry(struct gt911_data *data, u8 *status)
+{
+    int ret, i;
+
+    for (i = 0; i < 3; i++) {
+        ret = gt911_i2c_read(data, GT_GSTID_REG, status, 1);
+        if (ret == 0)
+            return 0;
+        usleep_range(1000, 2000);
+    }
+    return ret;
 }
 
 /*
@@ -268,45 +319,81 @@ static int gt911_input_register(struct gt911_data *data)
 static irqreturn_t gt911_irq_handler(int irq, void *dev_id)
 {
     struct gt911_data *data = dev_id;
+    struct device *dev = &data->client->dev;
     u8 status;
     u8 touch_buf[MAX_SUPPORT_POINTS * GT911_TOUCH_POINT_SIZE];
     int num_touches;
     int ret;
     int i;
 
-    /* 1. 读状态寄存器 */
-    ret = gt911_i2c_read(data, GT_GSTID_REG, &status, 1);
-    if (ret < 0)
-        goto out;
+    mutex_lock(&data->io_lock);
 
-    /* 2. bit7 = 0 表示 GT911 还没有准备好数据 */
-    if (!(status & GT911_STATUS_BUF_READY))
-        goto out;
+    /* 1. 读状态寄存器（最多重试 3 次） */
+    ret = gt911_read_status_retry(data, &status);
+    if (ret < 0) {
+        data->irq_i2c_fail_count++;
 
-    /* 3. 获取当前触摸点数 */
+        if (data->irq_i2c_fail_count <= 3)
+            dev_warn(dev, "irq: failed to read status: %d (fail_cnt=%d)\n",
+                     ret, data->irq_i2c_fail_count);
+
+        /* 连续失败 >20 → 调度 reset work（不在 irq 中直接复位） */
+        if (data->irq_i2c_fail_count >= 20 && !data->reset_pending) {
+            data->reset_pending = true;
+            dev_warn(dev, "irq: too many I2C failures, schedule reset_work\n");
+            schedule_work(&data->reset_work);
+        }
+
+        mutex_unlock(&data->io_lock);
+        return IRQ_HANDLED;
+    }
+
+    /* 读成功 → 清零失败计数 */
+    data->irq_i2c_fail_count = 0;
+
+#if GT911_DEBUG_IRQ
+    dev_info(dev, "irq: status=0x%02x ready=%d touch_num=%d\n",
+             status,
+             !!(status & GT911_STATUS_BUF_READY),
+             status & 0x0F);
+#endif
+
+    /* 2. 伪中断/无效状态 → 清 0x814E 释放 INT */
+    if (!(status & GT911_STATUS_BUF_READY)) {
+        gt911_i2c_write_byte(data, GT_GSTID_REG, 0x00);
+        mutex_unlock(&data->io_lock);
+        return IRQ_HANDLED;
+    }
+
+    /* 3. 获取触摸点数 */
     num_touches = status & 0x0F;
     if (num_touches > MAX_SUPPORT_POINTS)
         num_touches = MAX_SUPPORT_POINTS;
 
-    /* 4 & 5. 读取并上报每个触摸点 */
-    if (num_touches > 0)
-    {
+    if (num_touches > 0) {
         ret = gt911_i2c_read(data, GT_TP_REG, touch_buf,
                              num_touches * GT911_TOUCH_POINT_SIZE);
-        if (ret < 0)
-            goto clear_status;
+        if (ret < 0) {
+            input_mt_sync_frame(data->input_dev);
+            input_sync(data->input_dev);
+            gt911_i2c_write_byte(data, GT_GSTID_REG, 0x00);
+            mutex_unlock(&data->io_lock);
+            return IRQ_HANDLED;
+        }
 
-        for (i = 0; i < num_touches; i++)
-        {
+        for (i = 0; i < num_touches; i++) {
             u8 *p = &touch_buf[i * GT911_TOUCH_POINT_SIZE];
-            int id   = p[0] & 0x0F;           /* 触点 ID */
-            int x    = p[1] | (p[2] << 8);   /* X 坐标 (LE) */
-            int y    = p[3] | (p[4] << 8);   /* Y 坐标 (LE) */
-            int size = p[5] | (p[6] << 8);    /* 触摸面积 (LE) */
+            int id   = p[0] & 0x0F;
+            int x    = p[1] | (p[2] << 8);
+            int y    = p[3] | (p[4] << 8);
+            int size = p[5] | (p[6] << 8);
 
             if (id >= MAX_SUPPORT_POINTS)
                 continue;
 
+#if GT911_DEBUG_IRQ
+            dev_info(dev, "irq: id=%d x=%d y=%d size=%d\n", id, x, y, size);
+#endif
             input_mt_slot(data->input_dev, id);
             input_mt_report_slot_state(data->input_dev, MT_TOOL_FINGER, true);
             input_report_abs(data->input_dev, ABS_MT_POSITION_X, x);
@@ -315,18 +402,60 @@ static irqreturn_t gt911_irq_handler(int irq, void *dev_id)
         }
     }
 
-    /* 6. 帧同步 → 释放不活跃触点，模拟单点事件 */
+    /* 4. 帧同步 + 清状态 */
     input_mt_sync_frame(data->input_dev);
     input_mt_report_pointer_emulation(data->input_dev, true);
     input_sync(data->input_dev);
-
-clear_status:
-    /* 7. 清除状态 → GT911 释放 INT 引脚为高，准备下一轮中断 */
     gt911_i2c_write_byte(data, GT_GSTID_REG, 0x00);
 
-out:
+    mutex_unlock(&data->io_lock);
     return IRQ_HANDLED;
 }
+
+/* sysfs: /sys/bus/i2c/devices/1-005d/force_reset — 写 "1" 触发硬件恢复 */
+static ssize_t force_reset_store(struct device *dev,
+                                 struct device_attribute *attr,
+                                 const char *buf, size_t count)
+{
+    struct gt911_data *data = i2c_get_clientdata(to_i2c_client(dev));
+    u8 pid[4];
+    int ret, i;
+
+    if (count < 1 || buf[0] != '1')
+        return count;
+
+    dev_info(dev, "force_reset: start\n");
+
+    disable_irq(data->irq);
+    mutex_lock(&data->io_lock);
+
+    gt911_hw_reset_raw(data);
+
+    /* 复位后等 300ms 再读 PID，重试最多 5 次 */
+    msleep(300);
+    for (i = 0; i < 5; i++) {
+        ret = gt911_i2c_read(data, GT_PID_REG, pid, 4);
+        if (ret == 0)
+            break;
+        msleep(100);
+    }
+
+    if (ret == 0) {
+        dev_info(dev, "force_reset: PID=%c%c%c%c (attempt %d)\n",
+                 pid[0], pid[1], pid[2], pid[3], i + 1);
+        gt911_i2c_write_byte(data, GT_GSTID_REG, 0x00);
+    } else {
+        dev_warn(dev, "force_reset: PID read failed after %d retries\n", i);
+    }
+
+    data->irq_i2c_fail_count = 0;
+    data->reset_pending = false;
+    mutex_unlock(&data->io_lock);
+    enable_irq(data->irq);
+
+    return count;
+}
+static DEVICE_ATTR(force_reset, 0200, NULL, force_reset_store);
 
 static int gt911_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
@@ -340,7 +469,10 @@ static int gt911_probe(struct i2c_client *client, const struct i2c_device_id *id
         return -ENOMEM;
 
     data->client = client;
-    i2c_set_clientdata(client, data);  /* 挂到 I2C client 上，remove/中断中可取回 */
+    i2c_set_clientdata(client, data);
+
+    mutex_init(&data->io_lock);
+    INIT_WORK(&data->reset_work, gt911_reset_work);
 
     /*
      * 从设备树获取 GPIO
@@ -408,6 +540,10 @@ static int gt911_probe(struct i2c_client *client, const struct i2c_device_id *id
     }
 
     dev_info(dev, "GT911 probed\n");
+
+    device_create_file(&client->dev, &dev_attr_force_reset);
+    dev_info(dev, "sysfs force_reset created\n");
+
     return 0;
 }
 
@@ -416,6 +552,8 @@ static int gt911_remove(struct i2c_client *client)
 {
     struct gt911_data *data = i2c_get_clientdata(client);
 
+    device_remove_file(&client->dev, &dev_attr_force_reset);
+    cancel_work_sync(&data->reset_work);
     gpiod_set_value_cansleep(data->reset_gpio, 1); /* assert reset = 物理低 */
     dev_info(&client->dev, "GT911 removed\n");
     return 0;

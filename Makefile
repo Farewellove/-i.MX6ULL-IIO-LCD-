@@ -45,6 +45,8 @@ app:
 	$(APP_CC) user_app/icm20608APP.c -o $(OUT_BIN)/icm20608APP
 	$(APP_CC) user_app/lcd_test.c -o $(OUT_BIN)/lcd_test
 	$(APP_CC) user_app/input_test.c -o $(OUT_BIN)/input_test
+	$(APP_CC) user_app/touch_sensor_trigger.c -o $(OUT_BIN)/touch_sensor_trigger
+	$(APP_CC) -static user_app/touch_sensor_fb.c user_app/fb_draw.c -o $(OUT_BIN)/touch_sensor_fb -lrt
 
 # 编译并安装到 output + NFS
 install: all app
@@ -55,6 +57,9 @@ install: all app
 	cp -f $(OUT_BIN)/icm20608APP  $(NFS_DIR)/
 	cp -f $(OUT_BIN)/lcd_test  $(NFS_DIR)/
 	cp -f $(OUT_BIN)/input_test  $(NFS_DIR)/
+	cp -f $(OUT_BIN)/touch_sensor_trigger  $(NFS_DIR)/
+	cp -f $(OUT_BIN)/touch_sensor_fb  $(NFS_DIR)/
+	cp -f load_drivers.sh  $(NFS_DIR)/
 	@echo "============================================="
 	@echo "模块已输出到：$(OUT_MODULES)"
 	@ls -l $(OUT_MODULES)/*.ko
