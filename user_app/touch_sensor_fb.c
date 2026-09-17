@@ -1,6 +1,14 @@
 /**
  * touch_sensor_fb.c — Framebuffer 多传感器联动 Demo
  *
+ * 工作流程:
+ *   GT911 触摸 → input event → 读 IIO sysfs (AP3216C + ICM20608)
+ *   → 串口打印 → 用 fb_draw 直接绘到 /dev/fb0
+ *
+ * 已知问题: 大面积刷新 framebuffer 会干扰同板 I2C2 总线，导致触摸失效。
+ * 因此提供 --reset-after-draw (绘制后自动复位 GT911) 和下面三个
+ * 阶段隔离测试模式，用于定位是哪一步绘制导致触摸失效:
+ *
  * 阶段隔离测试模式：
  *   --fb-init-only-input-test    fb_init 后直接 event loop
  *   --fb-clear-only-input-test   fb_init + fb_clear 后 event loop
@@ -38,8 +46,14 @@ static int g_draw_wait   = 0;   /* --draw-wait */
 static int g_reset_after_draw = 0; /* --reset-after-draw */
 static int g_reset_delay_ms    = 1200; /* --reset-delay-ms */
 static int g_reset_gt911_once  = 0; /* --reset-gt911 */
+/* GT911 驱动暴露的 sysfs 手动恢复节点 (I2C 总线 1, 地址 0x5D) */
 static const char *g_force_reset_path = "/sys/bus/i2c/devices/1-005d/force_reset";
 
+/*
+ * 绘制完成后触发一次 GT911 硬件复位。
+ * 大面积刷新 framebuffer 会干扰 I2C2 总线导致触摸读坐标失败，
+ * 复位可让触摸芯片恢复可用。默认关闭，由 --reset-after-draw 开启。
+ */
 static void gt911_force_reset_after_draw(void)
 {
     FILE *fp;
@@ -64,7 +78,7 @@ static int do_gt911_reset_once(void)
     printf("[INFO] GT911 force_reset written\n");
     return 0;
 }
-static int g_fb_draw_wait_test  = 0;
+static int g_fb_draw_wait_test  = 0; /* --fb-draw-wait-input-test */
 
 static void handle_signal(int sig) { (void)sig; g_stop = 1; }
 
@@ -126,6 +140,10 @@ struct sensor_data {
     int ap_als, ap_ir, ap_ps, ap_ok;
     int icm_ax, icm_ay, icm_az, icm_gx, icm_gy, icm_gz, icm_temp, icm_ok;
 };
+/*
+ * 从 IIO sysfs 读取全部传感器原始值。
+ * 任一通道读失败时对应 ok 标志保持 0，绘图时显示 (not found) 而不是脏数据。
+ */
 static void read_sensor_values(struct sensor_data *sd) {
     char p[MAX_PATH]; memset(sd, 0, sizeof(*sd));
     if (g_ap[0]) {
@@ -143,6 +161,7 @@ static void read_sensor_values(struct sensor_data *sd) {
         snprintf(p, sizeof(p), "%s/in_temp0_raw",    g_icm); sd->icm_ok &= !read_sysfs_int(p, &sd->icm_temp);
     }
 }
+/* 把传感器原始值打印到 stdout (串口终端) */
 static void print_sensor_values(const struct sensor_data *sd) {
     printf("=== SENSOR DATA ===\n");
     if (sd->ap_ok)  printf("AP3216C ALS=%d IR=%d PS=%d\n", sd->ap_als, sd->ap_ir, sd->ap_ps);
@@ -155,12 +174,15 @@ static void print_sensor_values(const struct sensor_data *sd) {
 }
 
 /* ── UI ── */
-#define LX 20
-#define LH 22
+#define LX 20   /* 文本左边距 (像素) */
+#define LH 22   /* 行高 (像素) */
+
+/* 顶部标题栏 */
 static void draw_header(void) {
     fb_fill_rect(0, 0, fb_width(), 42, FB_DARKBLUE);
     fb_draw_string(LX, 12, "Touch-triggered Sensor Acquisition (FB)", FB_WHITE, FB_DARKBLUE);
 }
+/* 触摸触发后的传感器数据页: 逐行绘制 GT911/AP3216C/ICM20608 数据 */
 static void draw_sensor_screen(const struct sensor_data *sd) {
     fb_clear(FB_BLACK); draw_header(); int y = 60;
     fb_draw_string(LX, y, "[GT911]", FB_WHITE, FB_BLACK); y += LH;
@@ -184,6 +206,7 @@ static void draw_sensor_screen(const struct sensor_data *sd) {
     } else { fb_draw_printf(LX, y, FB_YELLOW, FB_BLACK, "  (not found)"); y += LH; }
     y += 8; fb_draw_string(LX, y, "Touch again / Ctrl+C to exit", FB_YELLOW, FB_BLACK);
 }
+/* 启动等待页 (仅 --draw-wait / --fb-draw-wait-input-test 下绘制) */
 static void draw_wait_screen(void) {
     fb_clear(FB_BLACK); draw_header(); int y = 60;
     fb_draw_string(LX, y, "Touch Sensor Framebuffer Demo", FB_WHITE, FB_BLACK); y += LH + 4;
@@ -195,6 +218,7 @@ static void draw_wait_screen(void) {
                    "ICM20608: %s", g_icm[0] ? g_icm : "(not found)"); y += LH + 10;
     fb_draw_string(LX, y, "Touch screen / Ctrl+C to exit", FB_YELLOW, FB_BLACK);
 }
+/* framebuffer 自检: 画色条 + 字体，验证 mmap 与像素格式转换是否正常 */
 static void fb_self_test(void) {
     fb_clear(FB_BLACK);
     fb_fill_rect(20, 20, 200, 40, FB_RED);    fb_draw_string(240, 30,  "RED bar",   FB_WHITE, FB_BLACK);
@@ -207,6 +231,11 @@ static void fb_self_test(void) {
 }
 
 /* ── 唯一触发入口 ── */
+
+/*
+ * 触摸触发的统一入口:
+ *   800ms 防抖 → 读 IIO 传感器 → 串口打印 → 绘制 LCD → (可选) 复位 GT911
+ */
 static void try_trigger_sensor_read(void) {
     long long now = get_time_ms();
     if (now - g_last_trigger < TRIGGER_INTERVAL) {
@@ -232,6 +261,7 @@ static void try_trigger_sensor_read(void) {
 }
 
 /* ── 事件处理 ── */
+/* 把 (type, code) 转成可读名字，仅用于 --debug-input 的日志打印 */
 static const char *ev_label(unsigned t, unsigned c) {
     if (t == EV_SYN && c == SYN_REPORT)        return "SYN_REPORT";
     if (t == EV_KEY && c == BTN_TOUCH)         return "BTN_TOUCH";
@@ -241,6 +271,11 @@ static const char *ev_label(unsigned t, unsigned c) {
     if (t == EV_ABS && c == ABS_Y)             return "ABS_Y";
     return "";
 }
+/*
+ * 单条 input 事件处理:
+ *   BTN_TOUCH=1 触发一次传感器读取；
+ *   --abs-trigger 模式下 ABS_X/Y 或 ABS_MT_POSITION_X/Y 也触发。
+ */
 static void process_input_event(const struct input_event *ev) {
     const char *nm = ev_label(ev->type, ev->code);
     if (g_debug_input) {
@@ -257,6 +292,14 @@ static void process_input_event(const struct input_event *ev) {
 }
 
 /* ══════ 统一事件循环 ══════ */
+
+/*
+ * 所有运行模式共用的事件循环 (poll + read)。
+ * poll 的 200ms 超时用于处理三件事:
+ *   - --force-trigger-loop: 每 2s 自动触发一次，便于在不触摸时验证绘图链路
+ *   - 每 5s 打印一次等待心跳
+ *   - 每 3s 打印 /proc/interrupts 中 gt911 的中断计数，判断中断是否还活着
+ */
 static int run_input_event_loop(int fd) {
     struct pollfd pfd; pfd.fd = fd; pfd.events = POLLIN;
     struct input_event ev;
@@ -322,6 +365,7 @@ int main(int argc, char *argv[]) {
     const char *event_dev = NULL, *fb_dev = "/dev/fb0";
     int i;
 
+    /* ── 参数解析: 第一个非选项参数是 event 设备，其余为运行模式开关 ── */
     for (i = 1; i < argc; i++) {
         if      (!strcmp(argv[i], "--fb") && i + 1 < argc) fb_dev = argv[++i];
         else if (!strcmp(argv[i], "--debug-input"))              g_debug_input = 1;
@@ -363,7 +407,7 @@ int main(int argc, char *argv[]) {
            g_input_only, g_no_fb, g_debug_input, g_abs_trigger, g_force_loop,
            g_fb_init_only_test, g_fb_clear_only_test, g_fb_draw_wait_test);
 
-    /* open input fd */
+    /* open input fd: O_NONBLOCK 与下面的事件循环 poll 配合使用 */
     int g_input_fd = open(event_dev, O_RDONLY | O_NONBLOCK);
     if (g_input_fd < 0) { perror("open input"); return 1; }
     char name[256] = {0};

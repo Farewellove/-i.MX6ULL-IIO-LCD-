@@ -15,6 +15,8 @@ NFS_DIR := /home/why/zdyz/nfs/rootfs/lib/modules/4.1.15
 APP_CC := arm-linux-gnueabihf-gcc
 
 # 要编译的模块
+# 注意: sensor_keys.ko 与设备树中 sensor_collect 节点绑定，
+# 默认不随本项目一起编译 (需要时取消下一行注释)
 obj-m += ap3216c.o
 #obj-m += sensor_keys.o
 obj-m += icm20608.o
